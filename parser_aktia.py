@@ -97,14 +97,67 @@ def parse_named_value(text, labels):
     return None
 
 
+IBAN_RE = re.compile(r"\b[A-Z]{2}\d{2}[A-Z0-9]{10,30}\b")
+BIC_RE = re.compile(r"^[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}([A-Z0-9]{3})?$")
+IDENTIFICATION_MARKER_RE = re.compile(r"TRANSAKTIONENS\s+IDENTIFIKATION", re.IGNORECASE)
+PURE_DIGITS_RE = re.compile(r"^\d{5,}$")
+
+# Lines that mark the end of one transaction's detail block (summary/footer/
+# header lines that are never part of a transaction's own detail lines).
+DETAIL_STOP_RE = re.compile(
+    r"^(SALDO|INS[ÄA]TTNINGAR|UTTAG|REGISTR\.?DAG|TRANSP$|AKTIA BANK|"
+    r"AVS[ÄA]NDARE|SAMMANDR|BET\.DAG|KONTOUTDRAG|MOTTAGARE|BIC-KOD|"
+    r"DISPONIBELT|FR[ÅA]N (B[ÖO]RJAN|PERIODENS))",
+    re.IGNORECASE,
+)
+
+
+def _extract_transaction_extras(detail_lines):
+    """Pull IBAN, BIC, and the actual payment reference number (viite) out of
+    a transaction's detail block, plus keep the raw lines as free-text notes.
+    """
+    iban = None
+    bic = None
+    payment_ref = None
+    in_identification_block = False
+
+    for line in detail_lines:
+        if IDENTIFICATION_MARKER_RE.search(line):
+            in_identification_block = True
+            continue
+
+        if iban is None:
+            iban_match = IBAN_RE.search(line)
+            if iban_match:
+                iban = iban_match.group(0)
+
+        if bic is None and line.upper() != "NOTPROVIDED" and BIC_RE.match(line):
+            bic = line
+
+        if in_identification_block and payment_ref is None:
+            if PURE_DIGITS_RE.match(line) and line.upper() != "NOTPROVIDED":
+                payment_ref = line
+
+    notes = "; ".join(
+        line for line in detail_lines
+        if line.upper() != "NOTPROVIDED" and not BIC_RE.match(line) and not IBAN_RE.fullmatch(line)
+    )
+
+    return {"iban": iban, "bic": bic, "payment_ref": payment_ref, "notes": notes}
+
+
 def parse_transactions(lines):
     transactions = []
     current_date = None
+    i = 0
 
-    for line in lines:
+    while i < len(lines):
+        line = lines[i]
+
         registr_match = REGISTR_DAG_RE.search(line)
         if registr_match:
             current_date = datetime.strptime(registr_match.group(1), "%d.%m.%Y").date()
+            i += 1
             continue
 
         tx_match = TRANSACTION_RE.match(line)
@@ -113,12 +166,31 @@ def parse_transactions(lines):
             if tx_match.group("sign") == "-":
                 amount = -amount
 
+            # Collect this transaction's detail lines (everything until the
+            # next transaction, a REGISTR.DAG marker, or a summary/footer line).
+            detail_lines = []
+            j = i + 1
+            while j < len(lines) and not TRANSACTION_RE.match(lines[j]) and not DETAIL_STOP_RE.match(lines[j]):
+                detail_lines.append(lines[j])
+                j += 1
+
+            extras = _extract_transaction_extras(detail_lines)
+
             transactions.append({
                 "date": current_date or datetime.today().date(),
                 "amount": amount,
                 "ref": tx_match.group("ref"),
                 "desc": tx_match.group("desc").strip(),
+                "payment_ref": extras["payment_ref"],
+                "counterparty_iban": extras["iban"],
+                "counterparty_bic": extras["bic"],
+                "notes": extras["notes"],
             })
+
+            i = j
+            continue
+
+        i += 1
 
     return transactions
 
