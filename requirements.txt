@@ -1,0 +1,9 @@
+beautifulsoup4
+Pillow
+PyPDF2
+PyInstaller
+pytest
+reportlab
+tkinterdnd2
+ttkthemes
+lxml

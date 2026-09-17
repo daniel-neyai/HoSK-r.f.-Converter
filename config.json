@@ -1,0 +1,15 @@
+{
+    "organization": "HoSK r.f.",
+    "default_bic": "HELSFIHH",
+    "currency": "EUR",
+    "strict_validation": false,
+    "output_naming": "iban_period",
+    "max_description_length": 140,
+    "admin_password": "admin123",
+    "theme": "dark",
+    "theme_style": "clam",
+    "auto_backup": true,
+    "log_folder": "logs",
+    "default_output_folder": "C:/Users/danie/Documents/HoSK r.f. - KASS\u00d6R 2026/converter_output",
+    "multi_folder_support": true
+}
